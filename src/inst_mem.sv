@@ -4,7 +4,8 @@
 module inst_mem #(
     parameter int ADDR_WIDTH  = 32,
     parameter int INSTR_WIDTH = 23,
-    parameter int MEM_WORDS   = 16384
+    parameter int MEM_WORDS   = 16384,
+    parameter INIT_FILE = "mem/instructions.mem"
 )(
     // 64 KB de instrucciones
     // 65536 bytes/4 bytes por slot = 16384 slots de 23 bits
@@ -18,7 +19,7 @@ module inst_mem #(
     assign inst = memory[addr[31:2]];
 
     initial begin
-        $readmemh("mem/instructions.mem", memory);
+        $readmemh(INIT_FILE, memory);
     end
 
 endmodule

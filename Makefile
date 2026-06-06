@@ -70,6 +70,31 @@ wave-file_crypto:
 wave-datapath:
 	env -u GTK_EXE_PREFIX -u GTK_PATH -u GSETTINGS_SCHEMA_DIR -u XDG_DATA_HOME -u XDG_DATA_DIRS -u LOCPATH -u GTK_IM_MODULE_FILE -u GIO_MODULE_DIR gtkwave sim/datapath_tb.vcd
 
+# =============================================================================
+# Iteration 2 — Realistic Main Memory
+# =============================================================================
+
+# Unit test for data_memoryv2 (standalone)
+memoryv2: setup
+	iverilog -g2012 -o sim/data_memoryv2_tb.vvp src/data_memoryv2.sv testbenches/data_memoryv2_tb.sv
+	vvp sim/data_memoryv2_tb.vvp
+
+# Full system with realistic memory + performance counters
+datapathv2: setup
+	iverilog -g2012 -o sim/datapathv2_perf_tb.vvp \
+		src/adder.sv src/alu.sv src/alu_v.sv src/auth_unit.sv src/branch_compare.sv \
+		src/control_unit.sv src/data_memoryv2.sv src/ex_mem_reg.sv src/fwd_logic.sv \
+		src/hazard_detection.sv src/id_ex_reg.sv src/if_id_reg.sv src/imm_gen.sv \
+		src/inst_mem.sv src/key_vault.sv src/mem_wb_reg.sv src/mux2.sv src/mux4.sv \
+		src/pipe_reg.sv src/program_counter.sv src/reg_file.sv src/sic_counter.sv \
+		src/datapathv2.sv testbenches/datapathv2_perf_tb.sv
+	vvp sim/datapathv2_perf_tb.vvp
+
+wave-memoryv2:
+	env -u GTK_EXE_PREFIX -u GTK_PATH -u GSETTINGS_SCHEMA_DIR -u XDG_DATA_HOME -u XDG_DATA_DIRS -u LOCPATH -u GTK_IM_MODULE_FILE -u GIO_MODULE_DIR gtkwave sim/data_memoryv2_tb.vcd
+
+wave-datapathv2:
+	env -u GTK_EXE_PREFIX -u GTK_PATH -u GSETTINGS_SCHEMA_DIR -u XDG_DATA_HOME -u XDG_DATA_DIRS -u LOCPATH -u GTK_IM_MODULE_FILE -u GIO_MODULE_DIR gtkwave sim/datapathv2_perf_tb.vcd
 
 clean:
 	rm -f sim/*.vvp sim/*.vcd sim/*.txt sim/*.bin
