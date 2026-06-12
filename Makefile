@@ -104,6 +104,10 @@ cache_l1: setup
 	iverilog -g2012 -o sim/cache_l1_tb.vvp src/cache_l1.sv testbenches/cache_l1_tb.sv
 	vvp sim/cache_l1_tb.vvp
 
+perf_counters: setup
+	iverilog -g2012 -o sim/perf_counters_tb.vvp src/perf_counters.sv testbenches/perf_counters_tb.sv
+	vvp sim/perf_counters_tb.vvp
+
 wave-cache_l1:
 	env -u GTK_EXE_PREFIX -u GTK_PATH -u GSETTINGS_SCHEMA_DIR -u XDG_DATA_HOME -u XDG_DATA_DIRS -u LOCPATH -u GTK_IM_MODULE_FILE -u GIO_MODULE_DIR gtkwave cache_l1_tb.vcd
 
