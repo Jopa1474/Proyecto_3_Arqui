@@ -109,13 +109,22 @@ logic cur_dirty0, cur_dirty1, cur_dirty2, cur_dirty3;
 logic [TAG_BITS-1:0] cur_tag0, cur_tag1, cur_tag2, cur_tag3;
 logic [2:0]        cur_plru;
 
+// Latched request — declaradas antes del always_comb que las usa
+logic [31:0]            latched_addr;
+logic                   latched_wr_en;
+logic [31:0]            latched_write_word;
+logic [INDEX_BITS-1:0]  latched_index;
+logic [TAG_BITS-1:0]    latched_tag;
+logic [OFFSET_BITS-1:0] latched_offset;
+logic [31:0]            latched_line_base;
+
 // Hit detection y victim selection sobre los registros cur_* (no arreglo multidim)
 logic [NUM_WAYS-1:0] way_hit;
 logic                l2_hit;
 logic [1:0]          hit_way;
 logic [1:0]          victim_way;
 
-always_comb begin
+always @(*) begin
     way_hit[0] = cur_valid0 && (cur_tag0 == latched_tag);
     way_hit[1] = cur_valid1 && (cur_tag1 == latched_tag);
     way_hit[2] = cur_valid2 && (cur_tag2 == latched_tag);
@@ -153,14 +162,6 @@ logic [3:0]  state;
 logic [3:0]  hit_counter;
 logic [1:0]  active_way;
 logic [31:0] fill_buffer [0:LINE_WORDS-1];
-
-logic [31:0]            latched_addr;
-logic                   latched_wr_en;
-logic [31:0]            latched_write_word;
-logic [INDEX_BITS-1:0]  latched_index;
-logic [TAG_BITS-1:0]    latched_tag;
-logic [OFFSET_BITS-1:0] latched_offset;
-logic [31:0]            latched_line_base;
 
 integer fi, fj;
 
