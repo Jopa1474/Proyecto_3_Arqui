@@ -124,7 +124,7 @@ logic                l2_hit;
 logic [1:0]          hit_way;
 logic [1:0]          victim_way;
 
-always_comb begin
+always @(*) begin
     way_hit[0] = cur_valid0 && (cur_tag0 == latched_tag);
     way_hit[1] = cur_valid1 && (cur_tag1 == latched_tag);
     way_hit[2] = cur_valid2 && (cur_tag2 == latched_tag);
