@@ -107,5 +107,27 @@ cache_l1: setup
 wave-cache_l1:
 	env -u GTK_EXE_PREFIX -u GTK_PATH -u GSETTINGS_SCHEMA_DIR -u XDG_DATA_HOME -u XDG_DATA_DIRS -u LOCPATH -u GTK_IM_MODULE_FILE -u GIO_MODULE_DIR gtkwave cache_l1_tb.vcd
 
+# =============================================================================
+# Iteration 4 (P4) — Pipeline + Cache Hierarchy Integration
+# =============================================================================
+
+CACHE_SRCS = src/adder.sv src/alu.sv src/alu_v.sv src/auth_unit.sv \
+             src/branch_compare.sv src/control_unit.sv src/data_memoryv2.sv \
+             src/ex_mem_reg.sv src/fwd_logic.sv src/hazard_detection.sv \
+             src/id_ex_reg.sv src/if_id_reg.sv src/imm_gen.sv src/inst_mem.sv \
+             src/key_vault.sv src/mem_wb_reg.sv src/mux2.sv src/mux4.sv \
+             src/program_counter.sv src/reg_file.sv src/sic_counter.sv \
+             src/cache_l1.sv src/cache_l2.sv src/cache_hierarchy.sv \
+             src/datapathv3.sv
+
+# Pipeline + cache integration testbench (verifies L1 hit / L2 hit / RAM miss)
+pipeline_cache: setup
+	iverilog -g2012 -o sim/pipeline_cache_tb.vvp \
+		$(CACHE_SRCS) testbenches/pipeline_cache_tb.sv
+	vvp sim/pipeline_cache_tb.vvp
+
+wave-pipeline_cache:
+	env -u GTK_EXE_PREFIX -u GTK_PATH -u GSETTINGS_SCHEMA_DIR -u XDG_DATA_HOME -u XDG_DATA_DIRS -u LOCPATH -u GTK_IM_MODULE_FILE -u GIO_MODULE_DIR gtkwave sim/pipeline_cache_tb.vcd
+
 clean:
 	rm -f sim/*.vvp sim/*.vcd sim/*.txt sim/*.bin
