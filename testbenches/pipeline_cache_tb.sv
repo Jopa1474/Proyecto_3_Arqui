@@ -94,7 +94,7 @@ module pipeline_cache_tb;
         // Mensajes iniciales para identificar la simulación en consola.
         
         $display("====================================================================");
-        $display("  pipeline_cache_tb — Cache Hierarchy Integration (P4)");
+        $display("  pipeline_cache_tb — Cache Hierarchy Integration ");
         $display("  datapathv3: L1(4KB/2-way/1-cyc) -> L2(16KB/4-way/8-cyc) -> RAM(25-cyc)");
         $display("====================================================================");
         $display("");
@@ -279,17 +279,53 @@ module pipeline_cache_tb;
                     if (stall_duration > 2 && stall_duration <= 25) begin
                         $display("         [PASS] Phase 5 (L2 hit): %0d cycles in [3,25]", stall_duration);
                         pass_count <= pass_count + 1;
-                    
+
                     // Si dura más de 25 ciclos, probablemente llegó hasta RAM.
                     end else if (stall_duration > 25) begin
                         $display("         [FAIL] Phase 5: Expected L2 hit (3-25 cycles), got RAM-level %0d",
                             stall_duration);
                         fail_count <= fail_count + 1;
-                    end 
-                    
+                    end
+
                     // Si dura 0-2 ciclos, parece que todavía estaba en L1.
                     else begin
                         $display("         [FAIL] Phase 5: Expected L2 hit, got L1-level %0d cycles",
+                            stall_duration);
+                        fail_count <= fail_count + 1;
+                    end
+                end
+
+                // Probando con Instruccion STORE. 
+                // -------------------------------------------------------------
+                // Verificación de Fase S1
+                // -------------------------------------------------------------
+                // Primer STORE a 0x0200 — dirección fría, va hasta RAM.
+                // Se espera un stall largo (>20 ciclos).
+                // -------------------------------------------------------------
+                if (stall_event_num == 5) begin
+                    if (stall_duration > 20) begin
+                        $display("         [PASS] Phase S1 (STORE RAM miss): %0d cycles > 20", stall_duration);
+                        pass_count <= pass_count + 1;
+                    end else begin
+                        $display("         [FAIL] Phase S1: Expected STORE RAM miss (>20 cycles), got %0d",
+                            stall_duration);
+                        fail_count <= fail_count + 1;
+                    end
+                end
+
+                // -------------------------------------------------------------
+                // Verificación de Fase S2
+                // -------------------------------------------------------------
+                // LOAD desde 0x0200 inmediatamente después del STORE.
+                // El bloque ya debe estar en L1, se espera hit corto (0-2 ciclos).
+                // La coherencia (R10 == 0xAB) se verifica al llegar a HALT.
+                // -------------------------------------------------------------
+                if (stall_event_num == 6) begin
+                    if (stall_duration <= 2) begin
+                        $display("         [PASS] Phase S2 (LOAD after STORE, L1 hit): %0d cycles", stall_duration);
+                        pass_count <= pass_count + 1;
+                    end else begin
+                        $display("         [FAIL] Phase S2: Expected L1 hit after STORE (<=2 cycles), got %0d",
                             stall_duration);
                         fail_count <= fail_count + 1;
                     end
@@ -415,6 +451,23 @@ module pipeline_cache_tb;
             $display("  R4=%08h  R5=%08h  R6=%08h  R7=%08h",
                 dut.rf.regs[4], dut.rf.regs[5],
                 dut.rf.regs[6], dut.rf.regs[7]);
+            $display("  R8=%08h  R9=%08h  R10=%08h",
+                dut.rf.regs[8], dut.rf.regs[9], dut.rf.regs[10]);
+            $display("");
+
+            // -----------------------------------------------------------------
+            // Verificación de coherencia STORE → LOAD
+            // -----------------------------------------------------------------
+            // R9 = 0xAB fue guardado en mem[0x0200] (Fase S1).
+            // R10 = LOAD de mem[0x0200] (Fase S2).
+            // Si R10 == 0xAB la jerarquía de caché mantiene coherencia de escritura.
+            // -----------------------------------------------------------------
+            $display("--- Write-then-Read Coherence ---");
+            if (dut.rf.regs[10] == 32'h000000AB)
+                $display("  [PASS] R10 = 0x000000AB, coherencia OK (STORE->LOAD correcto)");
+            else
+                $display("  [FAIL] R10 = %08h — esperado 000000AB (fallo de coherencia)",
+                    dut.rf.regs[10]);
 
             // Espera 20 ns para que se impriman los últimos mensajes.
             #20;
@@ -422,20 +475,43 @@ module pipeline_cache_tb;
         end
     end
 
-// ========================================================================= 
-// Monitor de Writeback 
-// ========================================================================= 
-// Este bloque imprime cada vez que el banco de registros escribe un valor. 
-// 
-// Se ejecuta en flanco negativo para observar el resultado después del 
-// flanco positivo donde pudo ocurrir la escritura.
-// 
-// No imprime escrituras a R0 porque normalmente R0 se mantiene en cero. 
 // =========================================================================
-   
+// Monitor de Writeback
+// =========================================================================
+// Este bloque imprime cada vez que el banco de registros escribe un valor.
+//
+// Se ejecuta en flanco negativo para observar el resultado después del
+// flanco positivo donde pudo ocurrir la escritura.
+//
+// No imprime escrituras a R0 porque normalmente R0 se mantiene en cero.
+// =========================================================================
+
     always @(negedge clk) begin
         if (!rst && dut.rf.write_en && dut.rf.rd != 4'd0) begin
             $display("[C%04d-WB] R%0d <= %08h", cycle_count, dut.rf.rd, dut.rf.WD3);
+        end
+    end
+
+// =========================================================================
+// Monitor de STORE
+// =========================================================================
+// Imprime cada vez que un STORE completa su escritura en la etapa MEM.
+// Detecta ambos casos:
+//   - STORE hit  (cache_stall=0 en el ciclo de escritura)
+//   - STORE miss (cache_stall cae a 0 tras resolver el miss)
+//
+// Verifica que el dato y la dirección sean los esperados para la Fase S1/S3:
+//   addr esperada = 0x00000200
+//   dato esperado = 0x000000AB  (R9 = ADDI R9, R0, 0xAB)
+// =========================================================================
+    always @(posedge clk) begin
+        if (!rst && dut.mem_write_mem && !dut.cache_stall) begin
+            if (dut.alu_result_mem == 32'h00000200 && dut.write_data_mem == 32'h000000AB)
+                $display("[C%04d-ST] STORE: addr=0x%08h | dato=0x%08h | [PASS] escritura correcta",
+                    cycle_count, dut.alu_result_mem, dut.write_data_mem);
+            else
+                $display("[C%04d-ST] STORE: addr=0x%08h | dato=0x%08h | [FAIL] dato o direccion inesperados",
+                    cycle_count, dut.alu_result_mem, dut.write_data_mem);
         end
     end
 
