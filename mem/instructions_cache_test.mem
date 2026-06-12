@@ -1,0 +1,110 @@
+// instructions_cache_test.mem — Cache hierarchy integration test
+// =============================================================================
+// Address layout (L1: req_index = addr[10:5], L2: req_index = addr[11:5]):
+//   0x0100  -> L1 set 8, tag 0x0,  L2 set 8,  tag 0x0
+//   0x0900  -> L1 set 8, tag 0x1,  L2 set 72, tag 0x0
+//   0x1100  -> L1 set 8, tag 0x2,  L2 set 8,  tag 0x1
+//
+// Test Phases:
+//   Phase 1: LOAD 0x0100 — RAM miss (cold)   → LONG STALL   [expected 33+ cycles]
+//   Phase 2: LOAD 0x0100 — L1 hit             → SHORT/NO STALL [expected 0-2 cycles]
+//   Phase 3: LOAD 0x0900 — RAM miss (setup)   → LONG STALL
+//   Phase 4: LOAD 0x1100 — RAM miss (setup)   → LONG STALL  (evicts 0x0100 from L1)
+//   Phase 5: LOAD 0x0100 — L2 hit             → MEDIUM STALL [expected ~8 cycles]
+//   HALT
+//
+// Register usage:
+//   R2 = 0x0100, R4 = 0x0900, R6 = 0x1100
+//   R1, R3, R5, R7 = scratch (load destinations)
+//
+// Instruction encoding (23-bit, 6 hex digits):
+//   ADDI rd, rs1, imm  = opcode[22:19]=0001, rd[18:15], rs1[14:11], imm[10:0]
+//   LOAD rd, imm(rs1)  = opcode[22:19]=0011, rd[18:15], rs1[14:11], imm[10:0]
+//   LLI  rd, sel, imm8 = opcode[22:19]=0010, rd[18:15], rs1=rd, sel[10:9], imm8[7:0]
+//   HALT               = opcode[22:19]=1001
+//   NOP                = 000000
+// =============================================================================
+
+000000  // [0]  NOP — pipeline warmup
+000000  // [1]  NOP
+000000  // [2]  NOP
+090100  // [3]  ADDI R2, R0, 256   -> R2 = 0x0100
+000000  // [4]  NOP
+000000  // [5]  NOP
+000000  // [6]  NOP
+
+// Pruebas con LOAD. 
+
+// --- Phase 1: RAM miss (cold access to 0x0100) ---
+189000  // [7]  LOAD R1, 0(R2)  addr=0x0100  [EXPECT: LONG STALL ~33+ cycles]
+000000  // [8]  NOP
+000000  // [9]  NOP
+000000  // [10] NOP
+
+// --- Phase 2: L1 hit (same address, now in cache) ---
+199000  // [11] LOAD R3, 0(R2)  addr=0x0100  [EXPECT: SHORT/NO STALL ~1 cycle]
+000000  // [12] NOP
+000000  // [13] NOP
+000000  // [14] NOP
+
+// --- Setup: fill L1 set 8 way 1 with 0x0900 ---
+120209  // [15] LLI R4, byte_sel=01, 0x09    -> R4 = 0x0900 (same L1 set 8, diff tag)
+000000  // [16] NOP
+000000  // [17] NOP
+000000  // [18] NOP
+1AA000  // [19] LOAD R5, 0(R4)  addr=0x0900  [setup: fills L1 set 8 way 1]
+000000  // [20] NOP
+000000  // [21] NOP
+000000  // [22] NOP
+
+// --- Setup: evict 0x0100 from L1 by loading 0x1100 (same L1 set, L2 set) ---
+130211  // [23] LLI R6, byte_sel=01, 0x11    -> R6 = 0x1100 (same L1 set 8, diff tag)
+000000  // [24] NOP
+000000  // [25] NOP
+000000  // [26] NOP
+1BB000  // [27] LOAD R7, 0(R6)  addr=0x1100  [setup: evicts 0x0100 from L1, LRU=way0]
+000000  // [28] NOP
+000000  // [29] NOP
+000000  // [30] NOP
+
+// --- Phase 5: L2 hit (0x0100 evicted from L1, still in L2 set 8) ---
+189000  // [31] LOAD R1, 0(R2)  addr=0x0100  [EXPECT: L2 HIT ~8 cycles stall]
+000000  // [32] NOP
+000000  // [33] NOP
+000000  // [34] NOP
+
+
+// Pruebas con STORE 
+
+// --- Setup STORE: R8 = 0x0200 (dirección destino), R9 = 0xAB (dato a guardar) ---
+0C0200  // [35] ADDI R8, R0, 512    -> R8 = 0x0200  (L1 set 16, distinto set al test LOAD)
+000000  // [36] NOP
+000000  // [37] NOP
+000000  // [38] NOP
+0C80AB  // [39] ADDI R9, R0, 0xAB  -> R9 = 0x000000AB
+000000  // [40] NOP
+000000  // [41] NOP
+000000  // [42] NOP
+
+// --- Fase S1: STORE cold miss (0x0200 no está en caché) ---
+24C000  // [43] STORE R9, 0(R8)  addr=0x0200  [EXPECT: LONG STALL ~33+ ciclos]
+000000  // [44] NOP
+000000  // [45] NOP
+000000  // [46] NOP
+
+// --- Fase S2: LOAD desde la misma dirección (verificar coherencia) ---
+1D4000  // [47] LOAD R10, 0(R8)  addr=0x0200  [EXPECT: L1 HIT ~1 ciclo, R10 = 0xAB]
+000000  // [48] NOP
+000000  // [49] NOP
+000000  // [50] NOP
+
+// --- Fase S3: STORE otra vez (L1 hit, stall corto o nulo) ---
+24C000  // [51] STORE R9, 0(R8)  addr=0x0200  [EXPECT: SHORT/NO STALL]
+000000  // [52] NOP
+000000  // [53] NOP
+000000  // [54] NOP
+
+480000  // [55] HALT
+000000  // [56] NOP (padding)
+000000  // [57] NOP (padding)
+000000  // [58] NOP (padding)

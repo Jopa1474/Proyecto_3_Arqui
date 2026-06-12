@@ -96,12 +96,6 @@ module data_memoryv2 #(
     assign align_fault = mem_req & (addr[1:0] != 2'b00);
 
     // =========================================================================
-    // Accepted request detection (no combinational loop — uses state directly)
-    // =========================================================================
-    logic req_accepted;
-    assign req_accepted = mem_req && !align_fault && (state == S_IDLE);
-
-    // =========================================================================
     // FSM — Main Memory Controller
     // =========================================================================
     typedef enum logic [2:0] {
@@ -112,6 +106,12 @@ module data_memoryv2 #(
     } state_t;
 
     state_t state;
+
+    // =========================================================================
+    // Accepted request detection (no combinational loop — uses state directly)
+    // =========================================================================
+    logic req_accepted;
+    assign req_accepted = mem_req && !align_fault && (state == S_IDLE);
 
     // Latched request parameters
     logic [13:0] latched_word_index;
