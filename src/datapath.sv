@@ -1,7 +1,21 @@
 // Datapath
-module datapath (
+module datapath #(
+    parameter INST_INIT_FILE = "mem/instructions.mem"
+)(
     input logic clk, rst
 );
+
+logic reg_write_cu, mem_write_cu, mem_read_cu, alu_src_cu;
+logic [1:0] wb_sel_cu;
+logic [1:0] BranchTypeD;
+logic BranchCondD, JumpD, JumpRegD;
+logic [2:0] alu_op_cu;
+logic is_vault_cu, is_lli_cu, halt_cu;
+logic do_setpwd, do_login, do_logout, do_authorize;
+logic do_vkload, do_vkinv, do_authchk, auth_denied;
+logic [1:0] tea_op_cu;
+logic auth_ok;
+logic nop;
 
 // IF ----------------------------------------------------------------------------------
 logic [31:0] pc_out, pc_plus4, pc_next;
@@ -16,7 +30,7 @@ adder #(32) add_pc4 (pc_out, 32'd4, pc_plus4);
 mux4 #(32) mux_pc (pc_plus4, branch_target, jr_target, 32'd0, pc_src_s, pc_next);
 program_counter pc_reg (.clk(clk), .rst(rst), .PCWrite((pc_write && !halt_cu && !halted) || 
          ((pc_src_s != 2'b00) && !nop && !halt_cu && !halted)), .pc_next(pc_next), .pc_out(pc_out));
-inst_mem  imem (.addr(pc_out), .inst(instr_if));
+inst_mem #(.INIT_FILE(INST_INIT_FILE)) imem (.addr(pc_out), .inst(instr_if));
 
 // IF/ID
 logic [22:0] instr;
@@ -88,18 +102,6 @@ branch_compare brcmp (
     .BranchCondD(BranchCondD),
     .TakenD(TakenD));
 
-// Control unit
-logic reg_write_cu, mem_write_cu, mem_read_cu, alu_src_cu;
-logic [1:0] wb_sel_cu;
-logic [1:0] BranchTypeD;
-logic BranchCondD, JumpD, JumpRegD;
-logic [2:0] alu_op_cu;
-logic is_vault_cu, is_lli_cu, halt_cu;
-logic do_setpwd, do_login, do_logout, do_authorize;
-logic do_vkload, do_vkinv, do_authchk, auth_denied;
-logic [1:0] tea_op_cu;
-logic auth_ok;
-
 control_unit cu (
     .opcode(opcode),
     .funct3(funct3),
@@ -142,8 +144,6 @@ logic IsAuthD;
 assign IsAuthD = do_login | do_setpwd | do_authorize | do_vkload;
 
 // Hazard detection
-logic nop;
-
 hazard_detection haz (
     .IF_ID_Rs1(rs1_eff),
     .IF_ID_Rs2(rs2_read),

@@ -72,7 +72,8 @@ module cache_l2 #(
     output logic [31:0] l2_read_hits,
     output logic [31:0] l2_read_misses,
     output logic [31:0] l2_write_hits,
-    output logic [31:0] l2_write_misses
+    output logic [31:0] l2_write_misses,
+    output logic        stall_l2_miss
 );
 
 // Arreglos de almacenamiento
@@ -162,6 +163,9 @@ logic [3:0]  state;
 logic [3:0]  hit_counter;
 logic [1:0]  active_way;
 logic [31:0] fill_buffer [0:LINE_WORDS-1];
+
+// Stall específico de miss en L2: activo durante la ruta a memoria principal
+assign stall_l2_miss = (state == S_MEM_REQ) || (state == S_MEM_WAIT) || (state == S_FILL_L2);
 
 integer fi, fj;
 
