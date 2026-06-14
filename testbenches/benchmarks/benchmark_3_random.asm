@@ -1,5 +1,6 @@
 # Benchmark 3
 # Accesso random a una ventana de memoria para evaluar hit rates y AMAT en el peor caso
+# Total accesos: 800
 
     # R2 <- base ventana (0x00000400)
     lli r2, 0x00, 0
@@ -11,7 +12,8 @@
     # R4 <- iteraciones
     addi r4, r0, 0
     lli  r6, 0x00, 0
-    lli  r6, 0x01, 1     # 256
+    lli  r6, 0x20, 0
+    lli  r6, 0x03, 1     # 800
 
     # R7 <- acumulador
     addi r7, r0, 0

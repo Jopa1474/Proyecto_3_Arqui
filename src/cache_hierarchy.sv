@@ -30,6 +30,8 @@ module cache_hierarchy #(
                                           // Este dato viene desde L1 si hay hit, o desde niveles inferiores si hubo miss.
     output logic        cache_stall,      // Señal que indica que el pipeline debe detenerse.
                                           // Cuando hay un miss en caché, cache_stall = 1, entonces el procesador debe congelar el PC y los registros del pipeline hasta que el dato esté listo
+    output logic        stall_l1_miss,    // Stall por miss de L1 (espera a L2)
+    output logic        stall_l2_miss,    // Stall por miss de L2 (espera a memoria principal)
 
 
 // -------Contadores de rendimiento---------------------------------------------------------
@@ -96,6 +98,7 @@ cache_l1 u_l1 (
     .cpu_read_data      (cpu_read_data),
     .cpu_valid          (),
     .cache_stall        (cache_stall),
+    .stall_l1_miss      (stall_l1_miss),
     // Conexion L1 - L2
     .l1_req             (l1_req),
     .l1_addr            (l1_addr),
@@ -143,7 +146,8 @@ cache_l2 u_l2 (
     .l2_read_hits       (l2_read_hits),
     .l2_read_misses     (l2_read_misses),
     .l2_write_hits      (l2_write_hits),
-    .l2_write_misses    (l2_write_misses)
+    .l2_write_misses    (l2_write_misses),
+    .stall_l2_miss      (stall_l2_miss)
 );
 
 // ============================================================

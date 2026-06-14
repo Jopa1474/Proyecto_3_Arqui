@@ -8,6 +8,7 @@ module perf_counters_tb;
     logic        instr_retired;
     logic        stall_l1miss;
     logic        stall_l2miss;
+    logic        stall_control;
 
     logic [31:0] l1_read_hits;
     logic [31:0] l1_read_misses;
@@ -26,6 +27,14 @@ module perf_counters_tb;
     logic [31:0] instructions_completed;
     logic [31:0] stall_cycles_l1miss;
     logic [31:0] stall_cycles_l2miss;
+    logic [31:0] stall_cycles_control;
+
+    logic [31:0] l1_read_accesses;
+    logic [31:0] l1_write_accesses;
+    logic [31:0] l1_total_accesses;
+    logic [31:0] l2_read_accesses;
+    logic [31:0] l2_write_accesses;
+    logic [31:0] l2_total_accesses;
 
     logic [31:0] mem_accesses;
     logic [31:0] mem_cycles_used;
@@ -43,6 +52,7 @@ module perf_counters_tb;
         .instr_retired(instr_retired),
         .stall_l1miss(stall_l1miss),
         .stall_l2miss(stall_l2miss),
+        .stall_control(stall_control),
         .l1_read_hits(l1_read_hits),
         .l1_read_misses(l1_read_misses),
         .l1_write_hits(l1_write_hits),
@@ -57,6 +67,13 @@ module perf_counters_tb;
         .instructions_completed(instructions_completed),
         .stall_cycles_l1miss(stall_cycles_l1miss),
         .stall_cycles_l2miss(stall_cycles_l2miss),
+        .stall_cycles_control(stall_cycles_control),
+        .l1_read_accesses(l1_read_accesses),
+        .l1_write_accesses(l1_write_accesses),
+        .l1_total_accesses(l1_total_accesses),
+        .l2_read_accesses(l2_read_accesses),
+        .l2_write_accesses(l2_write_accesses),
+        .l2_total_accesses(l2_total_accesses),
         .mem_accesses(mem_accesses),
         .mem_cycles_used(mem_cycles_used),
         .ipc_x1000(ipc_x1000),
@@ -73,12 +90,14 @@ module perf_counters_tb;
     task automatic tick(
         input logic retire_i,
         input logic l1_stall_i,
-        input logic l2_stall_i
+        input logic l2_stall_i,
+        input logic ctrl_stall_i
     );
         begin
             instr_retired = retire_i;
             stall_l1miss  = l1_stall_i;
             stall_l2miss  = l2_stall_i;
+            stall_control = ctrl_stall_i;
             @(posedge clk);
         end
     endtask
@@ -103,6 +122,7 @@ module perf_counters_tb;
         instr_retired = 1'b0;
         stall_l1miss  = 1'b0;
         stall_l2miss  = 1'b0;
+        stall_control = 1'b0;
 
         l1_read_hits    = 32'd0;
         l1_read_misses  = 32'd0;
@@ -124,23 +144,24 @@ module perf_counters_tb;
         // -----------------------------------------------------------------
         // Caso A: incremento de contadores e IPC
         // 10 ciclos, 6 instrucciones retiradas, 3 ciclos de stall por miss L1,
-        // 2 ciclos de stall por miss L2.
+        // 2 ciclos de stall por miss L2 y 2 ciclos de stall de control.
         // -----------------------------------------------------------------
-        tick(1'b1, 1'b0, 1'b0); // 1
-        tick(1'b0, 1'b1, 1'b0); // 2
-        tick(1'b1, 1'b0, 1'b0); // 3
-        tick(1'b1, 1'b1, 1'b0); // 4
-        tick(1'b0, 1'b0, 1'b1); // 5
-        tick(1'b1, 1'b0, 1'b0); // 6
-        tick(1'b0, 1'b1, 1'b0); // 7
-        tick(1'b1, 1'b0, 1'b1); // 8
-        tick(1'b0, 1'b0, 1'b0); // 9
-        tick(1'b1, 1'b0, 1'b0); // 10
+        tick(1'b1, 1'b0, 1'b0, 1'b0); // 1
+        tick(1'b0, 1'b1, 1'b0, 1'b0); // 2
+        tick(1'b1, 1'b0, 1'b0, 1'b0); // 3
+        tick(1'b1, 1'b1, 1'b0, 1'b1); // 4
+        tick(1'b0, 1'b0, 1'b1, 1'b0); // 5
+        tick(1'b1, 1'b0, 1'b0, 1'b0); // 6
+        tick(1'b0, 1'b1, 1'b0, 1'b0); // 7
+        tick(1'b1, 1'b0, 1'b1, 1'b1); // 8
+        tick(1'b0, 1'b0, 1'b0, 1'b0); // 9
+        tick(1'b1, 1'b0, 1'b0, 1'b0); // 10
 
         check_eq("total_cycles", total_cycles, 32'd10);
         check_eq("instructions_completed", instructions_completed, 32'd6);
         check_eq("stall_cycles_l1miss", stall_cycles_l1miss, 32'd3);
         check_eq("stall_cycles_l2miss", stall_cycles_l2miss, 32'd2);
+        check_eq("stall_cycles_control", stall_cycles_control, 32'd2);
         check_eq("ipc_x1000", ipc_x1000, 32'd600);
 
         // -----------------------------------------------------------------
@@ -162,6 +183,9 @@ module perf_counters_tb;
         #1;
         check_eq("l1_hit_rate_x1000_caseB", l1_hit_rate_x1000, 32'd1000);
         check_eq("l1_miss_rate_x1000_caseB", l1_miss_rate_x1000, 32'd0);
+        check_eq("l1_read_accesses_caseB", l1_read_accesses, 32'd100);
+        check_eq("l1_write_accesses_caseB", l1_write_accesses, 32'd0);
+        check_eq("l1_total_accesses_caseB", l1_total_accesses, 32'd100);
         check_eq("amat_x1000_caseB", amat_x1000, 32'd1000);
         check_eq("mem_accesses_fwd", mem_accesses, 32'd50);
         check_eq("mem_cycles_used_fwd", mem_cycles_used, 32'd1200);
@@ -184,6 +208,9 @@ module perf_counters_tb;
         check_eq("l1_miss_rate_x1000_caseC", l1_miss_rate_x1000, 32'd500);
         check_eq("l2_miss_rate_x1000_caseC", l2_miss_rate_x1000, 32'd250);
         check_eq("l2_hit_rate_x1000_caseC", l2_hit_rate_x1000, 32'd750);
+        check_eq("l2_read_accesses_caseC", l2_read_accesses, 32'd100);
+        check_eq("l2_write_accesses_caseC", l2_write_accesses, 32'd0);
+        check_eq("l2_total_accesses_caseC", l2_total_accesses, 32'd100);
         check_eq("amat_x1000_caseC", amat_x1000, 32'd9125);
 
         $display("Todas las pruebas de perf_counters pasaron.");

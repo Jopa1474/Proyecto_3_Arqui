@@ -59,6 +59,7 @@ module cache_l1 #(
     output logic [31:0] cpu_read_data,    // Dato LOAD (válido cuando cpu_valid=1)
     output logic        cpu_valid,        // Pulso 1 ciclo: operación completada
     output logic        cache_stall,      // 1 mientras el request está en proceso
+    output logic        stall_l1_miss,    // 1 cuando L1 espera respuesta de niveles inferiores
 
     // ---- Interfaz hacia cache_l2 ----
     // Conectar l1_dirty_line con genvar en el módulo superior si se usan
@@ -169,6 +170,9 @@ logic        saved_victim_dirty;  // Latched de victim_dirty en S_DECIDE
 // cache_stall: 1 mientras L1 procesa el request (pipeline congelado)
 assign cache_stall = (state == S_LOOKUP) || (state == S_DECIDE) ||
                      (state == S_MISS)   || (state == S_FILL);
+
+// stall_l1_miss: 1 solo cuando hubo miss en L1 y se está esperando por L2.
+assign stall_l1_miss = (state == S_MISS) || (state == S_FILL);
 
 integer fi;
 

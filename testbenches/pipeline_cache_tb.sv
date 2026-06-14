@@ -1,4 +1,21 @@
 `timescale 1ns/1ps
+
+`ifndef PROGRAM_FILE
+`define PROGRAM_FILE "mem/instructions_cache_test.mem"
+`endif
+
+`ifndef CACHE_CSV_FILE
+`define CACHE_CSV_FILE "sim/cache_timeline.csv"
+`endif
+
+`ifndef BENCH_ID
+`define BENCH_ID 0
+`endif
+
+`ifndef BENCH_MODE
+`define BENCH_MODE 0
+`endif
+
 // =============================================================================
 // pipeline_cache_tb.sv — Pipeline + Cache Hierarchy Integration Test 
 // =============================================================================
@@ -26,6 +43,16 @@
 
 module pipeline_cache_tb;
 
+    function automatic string benchmark_title();
+        case (`BENCH_ID)
+            1: benchmark_title = "Benchmark 1 - Sequential";
+            2: benchmark_title = "Benchmark 2 - Stride";
+            3: benchmark_title = "Benchmark 3 - Random";
+            4: benchmark_title = "Benchmark 4 - Thousands";
+            default: benchmark_title = "Cache test program";
+        endcase
+    endfunction
+
 
 // ========================================================================= 
 // Señales principales del testbench 
@@ -44,7 +71,8 @@ module pipeline_cache_tb;
 // =========================================================================
 
     datapathv3 #(
-        .INST_INIT_FILE("mem/instructions_cache_test.mem")) dut (  // Archivo de instrucciones para esta prueba
+        //.INST_INIT_FILE("mem/instructions_cache_test.mem")) dut (  // Archivo de instrucciones para esta prueba
+        .INST_INIT_FILE(`PROGRAM_FILE)) dut (  // Archivo de instrucciones para la prueba de benchmarks dinamico
         .clk(clk),  // Conecta el reloj del testbench al datapath
         .rst(rst)   // Conecta el reset del testbench al datapath
     ); 
@@ -78,6 +106,7 @@ module pipeline_cache_tb;
     int   pass_count;    // Cantidad de pruebas que pasaron
     int   fail_count;    // Cantidad de pruebas que fallaron
     logic halt_reported; // Evita que el bloque HALT se re-dispare cada ciclo
+    integer csv_fd;      // Archivo CSV para timeline de cache y rendimiento
 
 // ========================================================================= 
 // Bloque inicial: configuración de simulación, reset e inicialización 
@@ -96,8 +125,18 @@ module pipeline_cache_tb;
         $display("====================================================================");
         $display("  pipeline_cache_tb — Cache Hierarchy Integration ");
         $display("  datapathv3: L1(4KB/2-way/1-cyc) -> L2(16KB/4-way/8-cyc) -> RAM(25-cyc)");
+        $display("  Benchmark: %s", benchmark_title());
         $display("====================================================================");
         $display("");
+
+        // Archivo CSV para graficas de comportamiento de cache por ciclo.
+        csv_fd = $fopen(`CACHE_CSV_FILE, "w");
+        if (csv_fd == 0) begin
+            $display("[WARN] No se pudo abrir sim/cache_timeline.csv para escritura.");
+        end else begin
+            $fwrite(csv_fd,
+                "cycle,cache_stall,stall_l1_miss,stall_l2_miss,l1_read_hits,l1_read_misses,l1_write_hits,l1_write_misses,l2_read_hits,l2_read_misses,l2_write_hits,l2_write_misses,mem_accesses,mem_cycles,perf_cycles,perf_instr,perf_stall_cache,perf_stall_l1,perf_stall_l2,perf_stall_branch,perf_stall_load_use,ipc_x1000,l1_hit_rate_x1000,l1_miss_rate_x1000,l2_hit_rate_x1000,l2_miss_rate_x1000,amat_x1000\n");
+        end
 
        // Inicialización de contadores y banderas.
         cycle_count    = 0;  // Inicia contador de ciclos en 0
@@ -132,6 +171,40 @@ module pipeline_cache_tb;
     always @(posedge clk) begin
         if (!rst)
             cycle_count <= cycle_count + 1; // Suma 1 ciclo si el reset no está activo
+
+        // Escribe la traza CSV en cada ciclo activo para graficar el warm-up.
+        if (!rst && csv_fd != 0) begin
+            $fwrite(csv_fd,
+                "%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d\n",
+                cycle_count,
+                dut.cache_stall,
+                dut.stall_l1_miss,
+                dut.stall_l2_miss,
+                dut.l1_read_hits,
+                dut.l1_read_misses,
+                dut.l1_write_hits,
+                dut.l1_write_misses,
+                dut.l2_read_hits,
+                dut.l2_read_misses,
+                dut.l2_write_hits,
+                dut.l2_write_misses,
+                dut.perf_mem_accesses,
+                dut.perf_mem_cycles_used,
+                dut.perf_cycle_count,
+                dut.perf_instr_count,
+                dut.perf_cache_stall_cycles,
+                dut.perf_stall_l1miss_cycles,
+                dut.perf_stall_l2miss_cycles,
+                dut.perf_branch_stalls,
+                dut.perf_load_use_stalls,
+                dut.perf_ipc_x1000,
+                dut.perf_l1_hit_rate_x1000,
+                dut.perf_l1_miss_rate_x1000,
+                dut.perf_l2_hit_rate_x1000,
+                dut.perf_l2_miss_rate_x1000,
+                dut.perf_amat_x1000
+            );
+        end
     end
 
 // ========================================================================= 
@@ -234,7 +307,7 @@ module pipeline_cache_tb;
                 // Se espera RAM miss, por lo tanto el stall debe durar más de 
                 // 20 ciclos. 
                 // -------------------------------------------------------------
-                if (stall_event_num == 0) begin
+                if (!`BENCH_MODE && stall_event_num == 0) begin
                     if (stall_duration > 20) begin
                         $display("         [PASS] Phase 1 (RAM miss): %0d cycles > 20", stall_duration);
                         pass_count <= pass_count + 1;
@@ -251,7 +324,7 @@ module pipeline_cache_tb;
                 // Segundo acceso a 0x0100. 
                 // Se espera L1 hit, por lo tanto el stall debe ser de 0 a 2 ciclos. 
                 // -------------------------------------------------------------
-                if (stall_event_num == 1) begin
+                if (!`BENCH_MODE && stall_event_num == 1) begin
                     if (stall_duration <= 2) begin
                         $display("         [PASS] Phase 2 (L1 hit): %0d cycles ≤ 2", stall_duration);
                         pass_count <= pass_count + 1;
@@ -273,7 +346,7 @@ module pipeline_cache_tb;
                 // 
                 // Por eso se acepta un rango entre 3 y 25 ciclos. 
                 // -------------------------------------------------------------
-                if (stall_event_num == 4) begin
+                if (!`BENCH_MODE && stall_event_num == 4) begin
 
                     // Caso esperado: L2 hit.
                     if (stall_duration > 2 && stall_duration <= 25) begin
@@ -302,7 +375,7 @@ module pipeline_cache_tb;
                 // Primer STORE a 0x0200 — dirección fría, va hasta RAM.
                 // Se espera un stall largo (>20 ciclos).
                 // -------------------------------------------------------------
-                if (stall_event_num == 5) begin
+                if (!`BENCH_MODE && stall_event_num == 5) begin
                     if (stall_duration > 20) begin
                         $display("         [PASS] Phase S1 (STORE RAM miss): %0d cycles > 20", stall_duration);
                         pass_count <= pass_count + 1;
@@ -320,7 +393,7 @@ module pipeline_cache_tb;
                 // El bloque ya debe estar en L1, se espera hit corto (0-2 ciclos).
                 // La coherencia (R10 == 0xAB) se verifica al llegar a HALT.
                 // -------------------------------------------------------------
-                if (stall_event_num == 6) begin
+                if (!`BENCH_MODE && stall_event_num == 6) begin
                     if (stall_duration <= 2) begin
                         $display("         [PASS] Phase S2 (LOAD after STORE, L1 hit): %0d cycles", stall_duration);
                         pass_count <= pass_count + 1;
@@ -374,7 +447,8 @@ module pipeline_cache_tb;
             // Encabezado del reporte final.
             $display("");
             $display("====================================================================");
-            $display("  PROGRAM HALTED — Cycle %0d", cycle_count);
+            $display("  PROGRAM HALTED - Cycle %0d", cycle_count);
+            $display("  Benchmark: %s", benchmark_title());
             $display("====================================================================");
             $display("");
 
@@ -407,8 +481,32 @@ module pipeline_cache_tb;
             $display("  Total cycles:         %0d", dut.perf_cycle_count);
             $display("  Instructions retired: %0d", dut.perf_instr_count);
             $display("  Cache stall cycles:   %0d", dut.perf_cache_stall_cycles);
+            $display("    - L1 miss stalls:   %0d", dut.perf_stall_l1miss_cycles);
+            $display("    - L2 miss stalls:   %0d", dut.perf_stall_l2miss_cycles);
             $display("  Branch stall cycles:  %0d", dut.perf_branch_stalls);
             $display("  Load-use stalls:      %0d", dut.perf_load_use_stalls);
+            $display("");
+
+            // -----------------------------------------------------------------
+            // Metricas derivadas (calculadas dentro de perf_counters)
+            // -----------------------------------------------------------------
+            $display("--- Derived Metrics (x1000) ---");
+            $display("  IPC x1000:            %0d", dut.perf_ipc_x1000);
+            $display("  L1 hit rate x1000:    %0d", dut.perf_l1_hit_rate_x1000);
+            $display("  L1 miss rate x1000:   %0d", dut.perf_l1_miss_rate_x1000);
+            $display("  L2 hit rate x1000:    %0d", dut.perf_l2_hit_rate_x1000);
+            $display("  L2 miss rate x1000:   %0d", dut.perf_l2_miss_rate_x1000);
+            $display("  AMAT x1000:           %0d", dut.perf_amat_x1000);
+            $display("");
+
+            // Valor real con 3 decimales
+            $display("--- Derived Metrics (real) ---");
+            $display("  IPC:                  %0d.%03d", dut.perf_ipc_x1000/1000, dut.perf_ipc_x1000%1000);
+            $display("  L1 hit rate:          %0d.%03d%%", dut.perf_l1_hit_rate_x1000/10, dut.perf_l1_hit_rate_x1000%10*100);
+            $display("  L1 miss rate:         %0d.%03d%%", dut.perf_l1_miss_rate_x1000/10, dut.perf_l1_miss_rate_x1000%10*100);
+            $display("  L2 hit rate:          %0d.%03d%%", dut.perf_l2_hit_rate_x1000/10, dut.perf_l2_hit_rate_x1000%10*100);
+            $display("  L2 miss rate:         %0d.%03d%%", dut.perf_l2_miss_rate_x1000/10, dut.perf_l2_miss_rate_x1000%10*100);
+            $display("  AMAT (cycles):        %0d.%03d", dut.perf_amat_x1000/1000, dut.perf_amat_x1000%1000);
             $display("");
 
 
@@ -418,6 +516,9 @@ module pipeline_cache_tb;
             
             $display("--- Test Result ---");
             $display("  PASS: %0d / FAIL: %0d", pass_count, fail_count);
+
+            if (`BENCH_MODE)
+                $display("  BENCH MODE: aserciones de fases fijas deshabilitadas");
 
 
             // Si no hubo fallos y al menos una aserción se ejecutó, 
@@ -433,7 +534,7 @@ module pipeline_cache_tb;
             // Si no se ejecutó ninguna verificación, puede que no hayan ocurrido 
             // los eventos de stall esperados.
             else
-                $display("  WARNING: no assertions triggered — check stall events");
+                $display("  WARNING: no assertions triggered - check stall events");
 
             $display("====================================================================");
 
@@ -463,13 +564,20 @@ module pipeline_cache_tb;
             // Si R10 == 0xAB la jerarquía de caché mantiene coherencia de escritura.
             // -----------------------------------------------------------------
             $display("--- Write-then-Read Coherence ---");
-            if (dut.rf.regs[10] == 32'h000000AB)
+            if (`BENCH_MODE) begin
+                $display("  [INFO] Coherencia STORE->LOAD omitida en modo benchmark.");
+            end else if (dut.rf.regs[10] == 32'h000000AB)
                 $display("  [PASS] R10 = 0x000000AB, coherencia OK (STORE->LOAD correcto)");
             else
                 $display("  [FAIL] R10 = %08h — esperado 000000AB (fallo de coherencia)",
                     dut.rf.regs[10]);
 
             // Espera 20 ns para que se impriman los últimos mensajes.
+            if (csv_fd != 0) begin
+                $fclose(csv_fd);
+                csv_fd = 0;
+            end
+
             #20;
             $finish;
         end

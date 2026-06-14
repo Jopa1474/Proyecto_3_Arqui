@@ -12,6 +12,7 @@ module perf_counters (
     input  logic        instr_retired,
     input  logic        stall_l1miss,
     input  logic        stall_l2miss,
+    input  logic        stall_control,
 
     // Contadores acumulativos de L1
     input  logic [31:0] l1_read_hits,
@@ -34,6 +35,15 @@ module perf_counters (
     output logic [31:0] instructions_completed,
     output logic [31:0] stall_cycles_l1miss,
     output logic [31:0] stall_cycles_l2miss,
+    output logic [31:0] stall_cycles_control,
+
+    // Accesos por nivel separados por tipo
+    output logic [31:0] l1_read_accesses,
+    output logic [31:0] l1_write_accesses,
+    output logic [31:0] l1_total_accesses,
+    output logic [31:0] l2_read_accesses,
+    output logic [31:0] l2_write_accesses,
+    output logic [31:0] l2_total_accesses,
 
     // Contadores de memoria propagados directamente
     output logic [31:0] mem_accesses,
@@ -64,6 +74,7 @@ module perf_counters (
             instructions_completed  <= 32'd0;
             stall_cycles_l1miss     <= 32'd0;
             stall_cycles_l2miss     <= 32'd0;
+            stall_cycles_control    <= 32'd0;
         end else begin
             total_cycles <= total_cycles + 32'd1;
 
@@ -75,17 +86,28 @@ module perf_counters (
 
             if (stall_l2miss)
                 stall_cycles_l2miss <= stall_cycles_l2miss + 32'd1;
+
+            if (stall_control)
+                stall_cycles_control <= stall_cycles_control + 32'd1;
         end
     end
 
     always_comb begin
+        l1_read_accesses  = l1_read_hits + l1_read_misses;
+        l1_write_accesses = l1_write_hits + l1_write_misses;
+
         l1_hits     = l1_read_hits + l1_write_hits;
         l1_misses   = l1_read_misses + l1_write_misses;
         l1_accesses = l1_hits + l1_misses;
+        l1_total_accesses = l1_accesses;
+
+        l2_read_accesses  = l2_read_hits + l2_read_misses;
+        l2_write_accesses = l2_write_hits + l2_write_misses;
 
         l2_hits     = l2_read_hits + l2_write_hits;
         l2_misses   = l2_read_misses + l2_write_misses;
         l2_accesses = l2_hits + l2_misses;
+        l2_total_accesses = l2_accesses;
 
         mem_accesses   = total_mem_accesses;
         mem_cycles_used = total_mem_cycles;

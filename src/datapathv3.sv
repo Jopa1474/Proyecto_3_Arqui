@@ -181,6 +181,8 @@ logic cpu_req_mem; // Solicitud hacia cache_hierarchy
 logic [31:0] l1_read_hits, l1_read_misses, l1_write_hits, l1_write_misses;
 logic [31:0] l2_read_hits, l2_read_misses, l2_write_hits, l2_write_misses;
 logic [31:0] mem_accesses, mem_cycles;
+logic stall_l1_miss;
+logic stall_l2_miss;
 
 // -----------------------------------------------------------------------------
 // Registro MEM/WB: Salidas hacia WB
@@ -192,8 +194,24 @@ logic [31:0] read_data_wb, alu_result_wb, pc_plus4_wb;
 logic [31:0] perf_cycle_count;        // Cuenta ciclos totales ejecutados
 logic [31:0] perf_instr_count;        // Cuenta instrucciones retiradas
 logic [31:0] perf_cache_stall_cycles; // Cuenta ciclos perdidos por cache_stall
+logic [31:0] perf_stall_l1miss_cycles;// Cuenta ciclos de stall por miss de L1
+logic [31:0] perf_stall_l2miss_cycles;// Cuenta ciclos de stall por miss de L2
 logic [31:0] perf_branch_stalls;      // Cuenta stalls/flushes por branch
 logic [31:0] perf_load_use_stalls;    // Cuenta stalls por dependencia load-use
+logic [31:0] perf_ipc_x1000;          // IPC en punto fijo x1000
+logic [31:0] perf_l1_hit_rate_x1000;  // Hit rate L1 en punto fijo x1000
+logic [31:0] perf_l2_hit_rate_x1000;  // Hit rate L2 en punto fijo x1000
+logic [31:0] perf_l1_miss_rate_x1000; // Miss rate L1 en punto fijo x1000
+logic [31:0] perf_l2_miss_rate_x1000; // Miss rate L2 en punto fijo x1000
+logic [31:0] perf_amat_x1000;         // AMAT en punto fijo x1000
+logic [31:0] perf_l1_read_accesses;   // Accesos de lectura en L1
+logic [31:0] perf_l1_write_accesses;  // Accesos de escritura en L1
+logic [31:0] perf_l1_total_accesses;  // Accesos totales en L1
+logic [31:0] perf_l2_read_accesses;   // Accesos de lectura en L2
+logic [31:0] perf_l2_write_accesses;  // Accesos de escritura en L2
+logic [31:0] perf_l2_total_accesses;  // Accesos totales en L2
+logic [31:0] perf_mem_accesses;       // Accesos a memoria principal
+logic [31:0] perf_mem_cycles_used;    // Ciclos usados por memoria principal
 logic mem_write_wb;                   // STORE propagado hasta WB para contarlo como instrucción completada
 logic was_branch_ex, was_branch_mem, was_branch_wb; // Indica si hubo branch en EX, MEM O WB
 logic wb_valid;     // Indica si una instruccion valida llegó a WB.
@@ -619,6 +637,8 @@ cache_hierarchy hier (
     .cpu_write_data (write_data_mem),
     .cpu_read_data  (read_data),
     .cache_stall    (cache_stall),
+    .stall_l1_miss  (stall_l1_miss),
+    .stall_l2_miss  (stall_l2_miss),
     .l1_read_hits   (l1_read_hits),
     .l1_read_misses (l1_read_misses),
     .l1_write_hits  (l1_write_hits),
@@ -670,6 +690,45 @@ mux4 #(32) mux_wb (alu_result_wb, read_data_wb, pc_plus4_wb, 32'd0,
 // Performance Counters
 // =============================================================================
 
+// Contadores consolidados de rendimiento.
+perf_counters perf_cnt (
+    .clk                  (clk),
+    .rst_n                (~rst),
+    .instr_retired        (wb_valid),
+    .stall_l1miss         (stall_l1_miss),
+    .stall_l2miss         (stall_l2_miss),
+    .stall_control        (flush && !cache_stall),
+    .l1_read_hits         (l1_read_hits),
+    .l1_read_misses       (l1_read_misses),
+    .l1_write_hits        (l1_write_hits),
+    .l1_write_misses      (l1_write_misses),
+    .l2_read_hits         (l2_read_hits),
+    .l2_read_misses       (l2_read_misses),
+    .l2_write_hits        (l2_write_hits),
+    .l2_write_misses      (l2_write_misses),
+    .total_mem_accesses   (mem_accesses),
+    .total_mem_cycles     (mem_cycles),
+    .total_cycles         (perf_cycle_count),
+    .instructions_completed(perf_instr_count),
+    .stall_cycles_l1miss  (perf_stall_l1miss_cycles),
+    .stall_cycles_l2miss  (perf_stall_l2miss_cycles),
+    .stall_cycles_control (perf_branch_stalls),
+    .l1_read_accesses     (perf_l1_read_accesses),
+    .l1_write_accesses    (perf_l1_write_accesses),
+    .l1_total_accesses    (perf_l1_total_accesses),
+    .l2_read_accesses     (perf_l2_read_accesses),
+    .l2_write_accesses    (perf_l2_write_accesses),
+    .l2_total_accesses    (perf_l2_total_accesses),
+    .mem_accesses         (perf_mem_accesses),
+    .mem_cycles_used      (perf_mem_cycles_used),
+    .ipc_x1000            (perf_ipc_x1000),
+    .l1_hit_rate_x1000    (perf_l1_hit_rate_x1000),
+    .l2_hit_rate_x1000    (perf_l2_hit_rate_x1000),
+    .l1_miss_rate_x1000   (perf_l1_miss_rate_x1000),
+    .l2_miss_rate_x1000   (perf_l2_miss_rate_x1000),
+    .amat_x1000           (perf_amat_x1000)
+);
+
 // Propaga mem_write_mem hacia WB para poder contar STORE como instrucción retirada.
 always_ff @(posedge clk) begin
     if (rst)
@@ -695,25 +754,14 @@ end
 
 
 // Contadores principales de rendimiento. 
-// Solo cuentan mientras el procesador no esté detenido.
+// Se mantiene local únicamente el contador de stalls por load-use.
 always_ff @(posedge clk) begin
     if (rst) begin
-        perf_cycle_count        <= 32'd0; // Reinicia contador de ciclos
-        perf_instr_count        <= 32'd0; // Reinicia contador de instrucciones
-        perf_cache_stall_cycles <= 32'd0; // Reinicia contador de stalls de caché
-        perf_branch_stalls      <= 32'd0; // Reinicia contador de branch stalls
+        perf_cache_stall_cycles <= 32'd0; // Reinicia contador de stalls globales de caché
         perf_load_use_stalls    <= 32'd0; // Reinicia contador de load-use stalls
     end else if (!halted) begin
-        perf_cycle_count <= perf_cycle_count + 1; // Cuenta cada ciclo mientras no haya halt
-
-        if (wb_valid)
-            perf_instr_count <= perf_instr_count + 1; // Cuenta instrucciones completadas en WB
-
         if (cache_stall)
-            perf_cache_stall_cycles <= perf_cache_stall_cycles + 1; // Cuenta ciclos detenidos por caché
-
-        if (flush && !cache_stall)
-            perf_branch_stalls <= perf_branch_stalls + 1; // Cuenta flushes por branch/jump
+            perf_cache_stall_cycles <= perf_cache_stall_cycles + 1; // Cuenta stalls globales del pipeline por caché
 
         if (haz.load_use_stall && !cache_stall)
             perf_load_use_stalls <= perf_load_use_stalls + 1; // Cuenta stalls por dependencia load-use
