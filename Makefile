@@ -49,9 +49,22 @@ file_crypto: setup
 	vvp sim/data_memory_dump_tb.vvp
 
 # Sistema completo
+LEGACY_DATAPATH_SRCS = src/adder.sv src/alu.sv src/alu_v.sv src/auth_unit.sv \
+			 src/branch_compare.sv src/control_unit.sv src/data_memory.sv \
+			 src/ex_mem_reg.sv src/fwd_logic.sv src/hazard_detection.sv \
+			 src/id_ex_reg.sv src/if_id_reg.sv src/imm_gen.sv src/inst_mem.sv \
+			 src/key_vault.sv src/mem_wb_reg.sv src/mux2.sv src/mux4.sv \
+			 src/pipe_reg.sv src/program_counter.sv src/reg_file.sv \
+			 src/sic_counter.sv src/datapath.sv
+
 datapath: setup
-	iverilog -g2012 -o sim/datapath_tb.vvp src/*.sv testbenches/datapath_tb.sv
+	iverilog -g2012 -o sim/datapath_tb.vvp $(LEGACY_DATAPATH_SRCS) testbenches/datapath_tb.sv
 	vvp sim/datapath_tb.vvp > /dev/null
+
+datapath_benchmark_program: setup
+	iverilog -g2012 -DPROGRAM_FILE='"$(PROGRAM_FILE)"' -DBASELINE_CSV_FILE='"$(BASELINE_CSV_FILE)"' -DBENCH_ID=$(BENCH_ID) -o sim/datapath_benchmark_tb.vvp \
+		$(LEGACY_DATAPATH_SRCS) testbenches/datapath_benchmark_tb.sv
+	vvp sim/datapath_benchmark_tb.vvp
 
 # Abrir VCD en GTKWave
 wave-alu:
@@ -169,9 +182,24 @@ plots-benchmarks: benchmarks-asm
 	$(PYTHON) tools/plot_cache_behavior.py --input sim/cache_timeline_benchmark_4_thousands.csv --outdir sim/plots/benchmark_4_thousands
 	$(PYTHON) tools/plot_benchmark_summary_table.py --input sim/cache_timeline_benchmark_4_thousands.csv --outdir sim/plots/benchmark_4_thousands --benchmark-name "Benchmark 4 - Thousands"
 
+plots-benchmarks-nocache: benchmarks-asm
+	mkdir -p sim/plots/nocache/benchmark_1_sequential sim/plots/nocache/benchmark_2_stride sim/plots/nocache/benchmark_3_random sim/plots/nocache/benchmark_4_thousands
+	$(MAKE) datapath_benchmark_program PROGRAM_FILE=$(BENCH_MEM_DIR)/benchmark_1_sequential.mem BASELINE_CSV_FILE=sim/nocache_timeline_benchmark_1_sequential.csv BENCH_ID=1
+	$(PYTHON) tools/plot_baseline_benchmark_summary_table.py --input sim/nocache_timeline_benchmark_1_sequential.csv --outdir sim/plots/nocache/benchmark_1_sequential --benchmark-name "Benchmark 1 - Sequential"
+	$(MAKE) datapath_benchmark_program PROGRAM_FILE=$(BENCH_MEM_DIR)/benchmark_2_stride.mem BASELINE_CSV_FILE=sim/nocache_timeline_benchmark_2_stride.csv BENCH_ID=2
+	$(PYTHON) tools/plot_baseline_benchmark_summary_table.py --input sim/nocache_timeline_benchmark_2_stride.csv --outdir sim/plots/nocache/benchmark_2_stride --benchmark-name "Benchmark 2 - Stride"
+	$(MAKE) datapath_benchmark_program PROGRAM_FILE=$(BENCH_MEM_DIR)/benchmark_3_random.mem BASELINE_CSV_FILE=sim/nocache_timeline_benchmark_3_random.csv BENCH_ID=3
+	$(PYTHON) tools/plot_baseline_benchmark_summary_table.py --input sim/nocache_timeline_benchmark_3_random.csv --outdir sim/plots/nocache/benchmark_3_random --benchmark-name "Benchmark 3 - Random"
+	$(MAKE) datapath_benchmark_program PROGRAM_FILE=$(BENCH_MEM_DIR)/benchmark_4_thousands.mem BASELINE_CSV_FILE=sim/nocache_timeline_benchmark_4_thousands.csv BENCH_ID=4
+	$(PYTHON) tools/plot_baseline_benchmark_summary_table.py --input sim/nocache_timeline_benchmark_4_thousands.csv --outdir sim/plots/nocache/benchmark_4_thousands --benchmark-name "Benchmark 4 - Thousands"
+
 plots-benchmark-comparison: plots-benchmarks
 	mkdir -p sim/plots/comparison
 	$(PYTHON) tools/plot_benchmark_comparison.py --input-dir sim --outdir sim/plots/comparison
+
+plots-cache-vs-nocache-comparison: plots-benchmarks plots-benchmarks-nocache
+	mkdir -p sim/plots/comparison
+	$(PYTHON) tools/plot_cache_vs_nocache_comparison.py --input-dir sim --outdir sim/plots/comparison
 
 clean:
 	rm -f sim/*.vvp sim/*.vcd sim/*.txt sim/*.bin
