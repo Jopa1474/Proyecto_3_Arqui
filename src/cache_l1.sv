@@ -34,8 +34,6 @@
 //   cache_stall  → Persona 4 (pipeline freeze)
 //   l1_read_hits, l1_read_misses, l1_write_hits, l1_write_misses → Persona 5
 //
-// Autores: [Nombres del grupo]
-// CE-4301 Arquitectura de Computadores I, I Semestre 2026
 
 `timescale 1ns/1ps
 

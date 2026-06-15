@@ -195,6 +195,10 @@ module datapath_benchmark_tb;
                 csv_fd = 0;
             end
 
+            // Volcar memoria completa a archivo 
+            $writememh("mem/mem_dump.mem", dut.dmem.mem); 
+            $display("Dump completo → mem/mem_dump.mem");
+
             #20;
             $finish;
         end
