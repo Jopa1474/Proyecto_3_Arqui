@@ -15,7 +15,10 @@
 
 module hazard_detection (
 
-    // Etapa ID 
+    // Cache stall — congela PC e IF/ID sin insertar NOP
+    input  logic cache_stall,
+
+    // Etapa ID
     input  logic [3:0]  IF_ID_Rs1, // rs1_eff del datapath
     input  logic [3:0]  IF_ID_Rs2, // rs2_read del datapath
     input  logic BranchD,   // BranchTypeD != 2'b00
@@ -131,7 +134,7 @@ module hazard_detection (
         end
     end
 
-    // CONTROL 
+    // CONTROL
     always_comb begin
         PCWrite = 1'b1;
         IF_ID_Write = 1'b1;
@@ -141,6 +144,12 @@ module hazard_detection (
             PCWrite  = 1'b0;
             IF_ID_Write = 1'b0;
             control_mux_sel = 1'b1;
+        end
+
+        // Cache miss: congela PC e IF/ID; no NOP (la instrucción en ID es válida)
+        if (cache_stall) begin
+            PCWrite     = 1'b0;
+            IF_ID_Write = 1'b0;
         end
     end
 

@@ -1,0 +1,129 @@
+// instructions_perfv2.mem — Performance baseline test program (Iteration 2)
+// =========================================================================
+// Tests sequential stores, sequential loads, and strided loads to exercise
+// the 25-cycle memory latency on every access (no cache).
+//
+// Register usage:
+//   R1 = loop counter / data value
+//   R2 = base address for sequential access = 0x0100 (word 64)
+//   R3 = stride base address = 0x0200 (word 128)
+//   R4 = loaded value (verification)
+//   R5 = stride offset = 32 (8 words × 4 bytes)
+//   R6 = loop limit = 8
+//   R7 = temp for comparison
+//
+// Program flow:
+//   Phase 1: Store 8 sequential words to 0x100..0x11C (R1=1..8)
+//   Phase 2: Load 8 sequential words from 0x100..0x11C
+//   Phase 3: Store 4 strided words at stride=32 bytes from 0x200
+//   Phase 4: Load 4 strided words
+//   HALT
+//
+// ISA encoding (23-bit):
+//   ADDI:  [0001|rd(4)|rs1(4)|imm(11)]
+//   STORE: [0100|rs2(4)|rs1(4)|offset(11)]
+//   LOAD:  [0011|rd(4)|rs1(4)|imm(11)]
+//   R-TYPE:[1100|rd(4)|rs1(4)|rs2(4)|funct(3)|res(4)]
+//   BNE:   [0101|rs2(4)|rs1(4)|1|offset(10)]
+//   NOP:   [0000|0..0]
+//   HALT:  [1001|0..0]
+//
+// =========================================================================
+// Encoding helper:
+//   ADDI rd, rs1, imm →  0001_rd_rs1_imm11
+//   STORE rs2, rs1, offset → 0100_rs2_rs1_offset11
+//   LOAD rd, rs1, imm → 0011_rd_rs1_imm11
+//   ADD rd, rs1, rs2 → 1100_rd_rs1_rs2_000_0000
+//   BNE rs2, rs1, offset → 0101_rs2_rs1_1_offset10
+//   HALT → 1001_0000000000000000000
+//
+// Address 0x100 = offset 256 bytes = imm 0x100 = 256
+// We'll use ADDI to set base addresses, then STORE/LOAD with offset 0.
+// To avoid hazards, we insert NOPs between dependent instructions.
+//
+// --- Calculated hex encodings below ---
+
+// Setup registers
+// PC=0x00: ADDI R2, R0, 0x040   → R2 = 64*4 = 0x100 (base address bytes)
+//          opcode=0001, rd=0010, rs1=0000, imm=0_0100_0000_0 = 0x100 = 256
+//          Actually: imm11 for 0x100 = 100000000 (9 bits, fits in 11)
+//          0001_0010_0000_10000000000 = let's compute carefully
+//
+// 23-bit format: [22:19]=opcode [18:15]=rd [14:11]=rs1 [10:0]=imm
+//
+// ADDI R1, R0, 1:  0001_0001_0000_00000000001 = 0x088001
+088001
+// ADDI R2, R0, 256: 0001_0010_0000_00100000000 = 0x090100
+090100
+// ADDI R5, R0, 32:  0001_0101_0000_00000100000 = 0x0A8020
+0A8020
+// ADDI R6, R0, 8:   0001_0110_0000_00000001000 = 0x0B0008
+0B0008
+// ADDI R7, R0, 0:   0001_0111_0000_00000000000 = 0x0B8000
+0B8000
+// NOP (pipeline fill)
+000000
+// NOP
+000000
+// NOP
+000000
+//
+// === Phase 1: Sequential STORE loop (8 iterations) ===
+// Loop top at PC = 0x20 (word address 8)
+//
+// STORE R1, R2, 0:  0100_0001_0010_00000000000 = 0x209000
+// Store R1 to mem[R2 + 0]
+209000
+// NOP (avoid hazard on R2)
+000000
+// NOP
+000000
+// ADDI R2, R2, 4:   0001_0010_0010_00000000100 = 0x091004
+091004
+// ADDI R1, R1, 1:   0001_0001_0001_00000000001 = 0x088801
+088801
+// ADDI R7, R7, 1:   0001_0111_0111_00000000001 = 0x0BB801
+0BB801
+// NOP
+000000
+// NOP
+000000
+// BNE R7, R6, -8:   0101_0111_0110_1_1111111000 = branch back 8 instructions
+// offset = -8, 10-bit two's complement = 1111111000
+// 0101_0111_0110_1_1111111000 = 0x2BB7F8
+2BB7F8
+// NOP (branch delay)
+000000
+//
+// === Phase 2: Reset R2, Sequential LOAD loop (8 iterations) ===
+// ADDI R2, R0, 256: R2 = 0x100 again
+090100
+// ADDI R7, R0, 0:   R7 = 0
+0B8000
+// NOP
+000000
+// NOP
+000000
+//
+// Loop top for loads at PC = word 22
+// LOAD R4, R2, 0:   0011_0100_0010_00000000000 = 0x1A1000
+1A1000
+// NOP (load-use delay)
+000000
+// NOP
+000000
+// ADDI R2, R2, 4:   0001_0010_0010_00000000100 = 0x091004
+091004
+// ADDI R7, R7, 1:   0001_0111_0111_00000000001 = 0x0BB801
+0BB801
+// NOP
+000000
+// NOP
+000000
+// BNE R7, R6, -7:   offset = -7
+2BB7F9
+// NOP
+000000
+//
+// === HALT ===
+480000

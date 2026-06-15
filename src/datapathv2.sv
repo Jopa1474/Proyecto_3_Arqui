@@ -1,23 +1,33 @@
-// Datapath
-module datapath #(
+// =============================================================================
+// datapathv2.sv — Pipelined Datapath with Realistic Memory & Performance Counters
+// =============================================================================
+// Iteration 2: Extends the original datapath.sv with:
+//   1. data_memoryv2 integration (25-cycle latency, handshake protocol)
+//   2. mem_stall signal that freezes the entire pipeline during memory access
+//   3. Performance counters: cycles, instructions retired, stall breakdown
+//
+// All original modules (hazard_detection, fwd_logic, etc.) are reused as-is.
+// Only the data memory instantiation and pipeline control are modified.
+// =============================================================================
+
+module datapathv2 #(
     parameter INST_INIT_FILE = "mem/instructions.mem"
 )(
     input logic clk, rst
 );
 
-logic reg_write_cu, mem_write_cu, mem_read_cu, alu_src_cu;
-logic [1:0] wb_sel_cu;
-logic [1:0] BranchTypeD;
-logic BranchCondD, JumpD, JumpRegD;
-logic [2:0] alu_op_cu;
-logic is_vault_cu, is_lli_cu, halt_cu;
-logic do_setpwd, do_login, do_logout, do_authorize;
-logic do_vkload, do_vkinv, do_authchk, auth_denied;
-logic [1:0] tea_op_cu;
-logic auth_ok;
-logic nop;
+// =============================================================================
+// MEM_STALL — from data_memoryv2 handshake
+// =============================================================================
+logic mem_ready, mem_valid;
+logic mem_read_mem;
+logic mem_write_mem;
+logic mem_stall;
+assign mem_stall = (mem_read_mem || mem_write_mem) && !mem_valid;
 
-// IF ----------------------------------------------------------------------------------
+// =============================================================================
+// IF Stage
+// =============================================================================
 logic [31:0] pc_out, pc_plus4, pc_next;
 logic [31:0] branch_target, jr_target;
 logic [22:0] instr_if;
@@ -28,25 +38,39 @@ logic [1:0] pc_src_s;
 
 adder #(32) add_pc4 (pc_out, 32'd4, pc_plus4);
 mux4 #(32) mux_pc (pc_plus4, branch_target, jr_target, 32'd0, pc_src_s, pc_next);
-program_counter pc_reg (.clk(clk), .rst(rst), .PCWrite((pc_write && !halt_cu && !halted) || 
-         ((pc_src_s != 2'b00) && !nop && !halt_cu && !halted)), .pc_next(pc_next), .pc_out(pc_out));
+
+// PC write gated by mem_stall
+logic pc_write_final;
+assign pc_write_final = ((pc_write && !halt_cu && !halted) ||
+         ((pc_src_s != 2'b00) && !nop && !halt_cu && !halted)) && !mem_stall;
+
+program_counter pc_reg (
+    .clk(clk), .rst(rst),
+    .PCWrite(pc_write_final),
+    .pc_next(pc_next),
+    .pc_out(pc_out)
+);
+
 inst_mem #(.INIT_FILE(INST_INIT_FILE)) imem (.addr(pc_out), .inst(instr_if));
 
-// IF/ID
+// IF/ID — gated by mem_stall
 logic [22:0] instr;
 logic [31:0] pc_id;
-logic  if_id_en, flush;
+logic if_id_en, flush;
 
 if_id_reg if_id (
     .clk(clk), .rst(rst),
-    .en(if_id_en && !halted),
-    .flush(flush || halt_cu),
+    .en((if_id_en && !halted) && !mem_stall),
+    .flush((flush || halt_cu) && !mem_stall),
     .in_instr(instr_if),
     .in_pc(pc_out),
     .instr(instr),
-    .pc(pc_id));
+    .pc(pc_id)
+);
 
-// ID ----------------------------------------------------------------------------------
+// =============================================================================
+// ID Stage
+// =============================================================================
 logic [3:0] opcode, rd_d, rs1_d, rs1_eff, rs2_rtype, rs2_read;
 logic [2:0] funct3;
 logic [8:0] funct9;
@@ -77,7 +101,7 @@ logic reg_write_wb;
 
 reg_file rf (
     .clk(clk), .rst(rst),
-    .write_en(reg_write_wb),
+    .write_en(reg_write_wb && !mem_stall),
     .rs1(rs1_eff),
     .rs2(rs2_read),
     .rd(rd_wb),
@@ -86,7 +110,6 @@ reg_file rf (
     .RD2(src_b_d));
 
 // Forwarding hacia Decode + branch_compare
-// ForwardAD/BD: 00=regfile  01=result_wb(WB)  10=alu_result_mem(MEM)
 logic TakenD;
 logic [1:0] ForwardAD, ForwardBD;
 logic [31:0] BrA, BrB;
@@ -101,6 +124,18 @@ branch_compare brcmp (
     .BranchTypeD(BranchTypeD),
     .BranchCondD(BranchCondD),
     .TakenD(TakenD));
+
+// Control unit
+logic reg_write_cu, mem_write_cu, mem_read_cu, alu_src_cu;
+logic [1:0] wb_sel_cu;
+logic [1:0] BranchTypeD;
+logic BranchCondD, JumpD, JumpRegD;
+logic [2:0] alu_op_cu;
+logic is_vault_cu, is_lli_cu, halt_cu;
+logic do_setpwd, do_login, do_logout, do_authorize;
+logic do_vkload, do_vkinv, do_authchk, auth_denied;
+logic [1:0] tea_op_cu;
+logic auth_ok;
 
 control_unit cu (
     .opcode(opcode),
@@ -136,7 +171,6 @@ logic reg_write_ex;
 logic [3:0] rd_ex_w;
 logic mem_read_ex_w;
 logic reg_write_mem_w;
-logic mem_read_mem;
 logic [3:0] rd_mem_w;
 
 // IsAuthD: instrucción en ID consume rs1/rs2 en la etapa ID sin forwarding
@@ -144,6 +178,8 @@ logic IsAuthD;
 assign IsAuthD = do_login | do_setpwd | do_authorize | do_vkload;
 
 // Hazard detection
+logic nop;
+
 hazard_detection haz (
     .IF_ID_Rs1(rs1_eff),
     .IF_ID_Rs2(rs2_read),
@@ -179,7 +215,7 @@ assign PCSrcD = nop ? 2'b00 :
                 (JumpD || TakenD) ? 2'b01 :
                 2'b00;
 assign pc_src_s = (halted || halt_cu) ? 2'b00 : PCSrcD;
-assign flush = (pc_src_s != 2'b00) && !halted;
+assign flush = (pc_src_s != 2'b00) && !halted && !mem_stall;
 
 // Branch target y JR target calculados en Decode
 logic [31:0] PCBranchD;
@@ -212,7 +248,7 @@ auth_unit auth (
     .rs1_data(BrA),
     .uid_field(BrB[1:0]),
     .ki_field(ki_d),
-    .instr_retired(!nop && !halt_cu && !halted),
+    .instr_retired(!nop && !halt_cu && !halted && !mem_stall),
     .auth_ok(auth_ok),
     .ki_activo(ki_activo),
     .vf_flag(vf_flag),
@@ -241,7 +277,9 @@ key_vault key_vault (
     .key_word_out(key_word_d)
 );
 
-// ID/EX
+// =============================================================================
+// ID/EX — gated by mem_stall
+// =============================================================================
 logic mem_write_ex;
 logic [1:0] wb_sel_ex;
 logic alu_src_ex;
@@ -255,8 +293,8 @@ logic [31:0] key_word_ex;
 
 id_ex_reg id_ex (
     .clk(clk), .rst(rst),
-    .en(!halted),
-    .nop(nop && !halt_cu),
+    .en(!halted && !mem_stall),
+    .nop((nop && !halt_cu) && !mem_stall),
     .in_is_halt(halt_cu),  
     .in_reg_write(reg_write_cu),
     .in_wb_sel(wb_sel_cu),
@@ -296,7 +334,9 @@ id_ex_reg id_ex (
     .rs1(rs1_ex),
     .rs2(rs2_ex));
 
-// EX ----------------------------------------------------------------------------------
+// =============================================================================
+// EX Stage
+// =============================================================================
 logic [1:0] ForwardA, ForwardB;
 logic [31:0] fwd_a, fwd_b;
 
@@ -340,14 +380,15 @@ alu_v alu_v (
 logic [31:0] alu_result_final;
 mux2 #(32) mux_alu_sel (alu_result_ex, vault_result_ex, is_vault_ex, alu_result_final);
 
-// EX/MEM
-logic mem_write_mem;
+// =============================================================================
+// EX/MEM — gated by mem_stall
+// =============================================================================
 logic [1:0] wb_sel_mem;
 logic [31:0] write_data_mem, pc_plus4_mem;
 
 ex_mem_reg ex_mem (
     .clk(clk), .rst(rst),
-    .en(!halted),
+    .en(!halted && !mem_stall),
     .in_is_halt(halt_ex), 
     .in_reg_write(reg_write_ex),
     .in_wb_sel(wb_sel_ex),
@@ -367,26 +408,43 @@ ex_mem_reg ex_mem (
     .pc_plus4(pc_plus4_mem),
     .rd(rd_mem_w));
 
-// MEM ----------------------------------------------------------------------------------
+// =============================================================================
+// MEM Stage — data_memoryv2 with handshake
+// =============================================================================
 logic [31:0] read_data;
 logic align_fault;
 
-data_memory dmem (
-    .clk(clk), .rst_n(~rst),
+// Generate mem_req: only when a LOAD or STORE is in MEM and controller is idle
+logic mem_req_out;
+assign mem_req_out = (mem_read_mem || mem_write_mem) && mem_ready && !align_fault;
+
+data_memoryv2 dmem (
+    .clk(clk),
+    .rst_n(~rst),
     .addr(alu_result_mem),
     .write_data(write_data_mem),
-    .mem_read(mem_read_mem),
-    .mem_write(mem_write_mem),
+    .mem_req(mem_req_out),
+    .mem_wr_en(mem_write_mem),
+    .burst_en(1'b0),              // No burst without cache (single-word only)
     .read_data(read_data),
-    .align_fault(align_fault));
+    .burst_data(),                // Unused until L1/L2 cache
+    .mem_ready(mem_ready),
+    .mem_valid(mem_valid),
+    .align_fault(align_fault),
+    .total_mem_accesses(),
+    .total_mem_cycles(),
+    .burst_count()
+);
 
-// MEM/WB
+// =============================================================================
+// MEM/WB — gated by mem_stall
+// =============================================================================
 logic [1:0] wb_sel_wb;
 logic [31:0] read_data_wb, alu_result_wb, pc_plus4_wb;
 
 mem_wb_reg mem_wb (
     .clk(clk), .rst(rst),
-    .en(!halted),
+    .en(!halted && !mem_stall),
     .in_is_halt(halt_mem), 
     .in_reg_write(reg_write_mem_w),
     .in_wb_sel(wb_sel_mem),
@@ -402,9 +460,96 @@ mem_wb_reg mem_wb (
     .pc_plus4(pc_plus4_wb),
     .rd(rd_wb));
 
-// WB ----------------------------------------------------------------------------------
+// =============================================================================
+// WB Stage
+// =============================================================================
 // 00=ALU/TEA  01=Mem  10=PC+4(JAL)
 mux4 #(32) mux_wb (alu_result_wb, read_data_wb, pc_plus4_wb, 32'd0,
                    wb_sel_wb, result_wb);
+
+// =============================================================================
+// Performance Counters
+// =============================================================================
+// These are accessible from the testbench via hierarchical references.
+
+logic [31:0] perf_cycle_count;       // Total CPU cycles elapsed
+logic [31:0] perf_instr_count;       // Instructions retired (LOADs, STOREs, BRANCHes, ALU, etc.)
+logic [31:0] perf_mem_stall_cycles;  // Cycles lost waiting for main memory
+logic [31:0] perf_branch_stalls;     // Cycles lost to branch/jump flushes
+logic [31:0] perf_load_use_stalls;   // Cycles lost to load-use hazard stalls
+
+// Track whether a valid instruction is in the WB stage
+// A valid instruction in WB: not a NOP bubble, not halted, not stalled
+// We track this by checking if any meaningful control signal was active.
+// The WB stage has reg_write_wb for ALU/LOAD, or we detect STORE/BRANCH
+// by tracking additional signals through the pipeline.
+
+// To accurately count LOADs, STOREs, and BRANCHes, we track mem_write and flush
+// through the pipeline. For simplicity, we use a "wb_valid" signal that indicates
+// a real instruction (not a NOP bubble) is retiring from WB.
+
+// Track whether instruction in WB is valid (non-NOP)
+// An instruction is a NOP bubble if all its control signals are zero.
+// We detect a valid instruction by: reg_write_wb OR mem_write propagated OR
+// the instruction was a branch/store.
+
+// Propagate mem_write through MEM/WB for counting stores
+logic mem_write_wb;
+always_ff @(posedge clk) begin
+    if (rst)
+        mem_write_wb <= 1'b0;
+    else if (!halted && !mem_stall)
+        mem_write_wb <= mem_write_mem;
+    else if (!mem_stall)
+        mem_write_wb <= 1'b0;
+end
+
+// Propagate "was a branch/jump" through the pipeline for counting
+// We detect branch/jump at ID stage via flush signal
+logic was_branch_ex, was_branch_mem, was_branch_wb;
+always_ff @(posedge clk) begin
+    if (rst) begin
+        was_branch_ex  <= 1'b0;
+        was_branch_mem <= 1'b0;
+        was_branch_wb  <= 1'b0;
+    end else if (!halted && !mem_stall) begin
+        was_branch_ex  <= flush;  // Branch/jump detected in ID → creates flush
+        was_branch_mem <= was_branch_ex;
+        was_branch_wb  <= was_branch_mem;
+    end
+end
+
+// wb_valid: a real instruction is retiring
+logic wb_valid;
+assign wb_valid = (reg_write_wb || mem_write_wb || was_branch_wb) && !halted && !mem_stall;
+
+always_ff @(posedge clk) begin
+    if (rst) begin
+        perf_cycle_count      <= 32'd0;
+        perf_instr_count      <= 32'd0;
+        perf_mem_stall_cycles <= 32'd0;
+        perf_branch_stalls    <= 32'd0;
+        perf_load_use_stalls  <= 32'd0;
+    end else if (!halted) begin
+        // Total cycles always increment (even during stalls)
+        perf_cycle_count <= perf_cycle_count + 1;
+
+        // Instruction retired from WB
+        if (wb_valid)
+            perf_instr_count <= perf_instr_count + 1;
+
+        // Memory stall cycles
+        if (mem_stall)
+            perf_mem_stall_cycles <= perf_mem_stall_cycles + 1;
+
+        // Branch/jump flush cycles (only count if not also mem-stalled)
+        if (flush && !mem_stall)
+            perf_branch_stalls <= perf_branch_stalls + 1;
+
+        // Load-use hazard stall cycles (only count if not also mem-stalled)
+        if (haz.load_use_stall && !mem_stall)
+            perf_load_use_stalls <= perf_load_use_stalls + 1;
+    end
+end
 
 endmodule
